@@ -4,7 +4,11 @@ import axios from "axios";
 
 const API_KEY = process.env.FMP_API_KEY;
 
-const fetchEarningsCallData = async (
+/**
+ * function to fetch earnings call transcript
+ * fetches the transcript of the latest earnings call, using ticker, year and quarter
+ */
+const fetchEarningsCallTranscriptData = async (
   ticker: string,
   year: number,
   quarter: number
@@ -37,6 +41,11 @@ const fetchEarningsCallData = async (
   }
 };
 
+/**
+ * function to understand multiple quarters, and context behind the query
+ *
+ */
+
 const fetchEarningsWithContext = async (
   ticker: string,
   timeRange: string
@@ -48,7 +57,7 @@ const fetchEarningsWithContext = async (
 
   console.log(`Fetching earnings for ${ticker} with time range: ${timeRange}`);
 
-  // Check if time range is multiple quarters
+  // Check if time range is multiple quarters, and set attempts accordingly
   const isMultipleQuarters =
     timeRange.toLowerCase().includes("last") ||
     timeRange.toLowerCase().includes("few") ||
@@ -61,11 +70,9 @@ const fetchEarningsWithContext = async (
   const maxAttempts = isMultipleQuarters ? 4 : 8; // Maximum attempts for multiple quarters
 
   while (attempts < maxAttempts) {
-    // console.log(
-    //   `Checking earnings call for ${ticker}, Year: ${currentYear}, Quarter: ${currentQuarter}`
-    // );
+    // console.log(`Checking earnings call for ${ticker}, Year: ${currentYear}, Quarter: ${currentQuarter}`); // denug
 
-    const transcript = await fetchEarningsCallData(
+    const transcript = await fetchEarningsCallTranscriptData(
       ticker,
       currentYear,
       currentQuarter
@@ -119,6 +126,7 @@ const COMPANY_ALIASES: { [key: string]: string } = {
   lyft: "Lyft Inc.",
 };
 
+// function to fetch tickers from company names, and store them in a map
 const getTickersFromCompanyNames = async (
   companyNames: string[] | string
 ): Promise<{ [key: string]: string }> => {
@@ -146,16 +154,15 @@ const getTickersFromCompanyNames = async (
 
       if (filteredResults.length > 0) {
         const ticker = filteredResults[0].symbol;
-        // console.log(`Found ticker: ${ticker} for company: ${company}`);
         companyTickerMap[company] = ticker;
       }
-      //   console.log(companyTickerMap);
     }
   }
 
   return companyTickerMap;
 };
 
+//function to fetch financial metric
 const fetchFinancialMetric = async (
   ticker: string,
   metric: string
@@ -175,6 +182,7 @@ const fetchFinancialMetric = async (
       ebitda: "ebitda",
       "earnings before interest and taxes": "ebitda",
       "gross profit": "grossProfit",
+      profit: "grossProfit",
       "cost and expenses": "costAndExpenses",
       "operating income": "operatingIncome",
     };
@@ -187,12 +195,14 @@ const fetchFinancialMetric = async (
 
     return result
       ? `${metric}: ${result.toLocaleString()}`
-      : `No data available for ${metric} of ${ticker}.`;
+      : `No data available for ${metric} of ${ticker}`;
   } catch (error: any) {
     console.error("Error fetching financial metric:", error.message);
-    return `Error retrieving ${metric} for ${ticker}.`;
+    return `Error retrieving ${metric} for ${ticker}`;
   }
 };
+
+// Controller fuction to fetch earnings call
 
 const fetchEarningsCallController = async (req: Request, res: Response) => {
   const { ticker } = req.params;
@@ -224,6 +234,7 @@ const fetchEarningsCallController = async (req: Request, res: Response) => {
   }
 };
 
+// Controller fuction to fetch ticker
 const getTickerController = async (
   req: Request,
   res: Response
@@ -245,6 +256,7 @@ const getTickerController = async (
   res.status(200).json({ ticker });
 };
 
+// Controller function to fetch financial metric
 const getFinancialMetricController = async (
   req: Request,
   res: Response
@@ -277,7 +289,7 @@ const getFinancialMetricController = async (
 
 export {
   fetchEarningsCallController,
-  fetchEarningsCallData,
+  fetchEarningsCallTranscriptData,
   getTickerController,
   getTickersFromCompanyNames,
   fetchEarningsWithContext,

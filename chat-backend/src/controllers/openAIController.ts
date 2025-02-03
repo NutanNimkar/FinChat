@@ -16,6 +16,15 @@ const extractQueryDetails = async (
     .map((msg) => `User: ${msg.user}\nAI: ${msg.ai || ""}`)
     .join("\n");
 
+ /**
+  * Using the prompt below, analyze the latest query and extract relevant details.
+  * If the query is a follow-up question, infer missing details from the conversation history.
+  * If the query is casual (e.g. "Nice", "Tell me more"), set "casual": true.
+  * Extract details only from query if available.
+  * If details are missing, refer to previous responses and history
+  * If the query is asking for a specific financial metric (e.g. "revenue," "gross profit," "net income"), set "intent" to "financial_metrics" and extract the requested metric.
+  * Return a valid JSON object only in this format to make it easier to parse
+  */
   const prompt = `
   Given the conversation history below, analyze the latest query and extract relevant details.
 
@@ -74,7 +83,7 @@ const extractQueryDetails = async (
     });
 
     const rawContent = response.choices[0].message?.content?.trim();
-    // console.log("Raw OpenAI Response:", rawContent);
+    // console.log("Raw OpenAI Response:", rawContent); //debug responses
 
     if (!rawContent) {
       throw new Error("OpenAI returned an empty response.");
@@ -84,7 +93,7 @@ const extractQueryDetails = async (
     if (parsedResponse) {
       return parsedResponse;
     }
-    // console.log("Extracted JSON:", parsedResponse);
+    // console.log("Extracted JSON:", parsedResponse); // debug parsed responses
 
     return parsedResponse;
   } catch (error: any) {
@@ -93,7 +102,7 @@ const extractQueryDetails = async (
   }
 };
 
-const summarizeEarningsCall = async (
+const summarizeTranscriptController = async (
   transcript: string,
   query: string,
   company: string,
@@ -122,10 +131,10 @@ const summarizeEarningsCall = async (
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      // model: 'gpt-3.5-turbo', 
+      // model: 'gpt-3.5-turbo', //incase gpt-4 is not available
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
-      // max_tokens: 500,
+      // max_tokens: 500, //incase gpt-4 is not available
     });
     return response.choices[0].message?.content || null;
   } catch (error: any) {
@@ -134,4 +143,4 @@ const summarizeEarningsCall = async (
   }
 };
 
-export { summarizeEarningsCall, extractQueryDetails };
+export { summarizeTranscriptController, extractQueryDetails };

@@ -1,11 +1,16 @@
 import { Request, Response } from "express";
-import { extractQueryDetails, summarizeEarningsCall } from "./openAIController";
+import { extractQueryDetails, summarizeTranscriptController } from "./openAIController";
 import {
   getTickersFromCompanyNames,
   fetchEarningsWithContext,
   fetchFinancialMetric,
 } from "./financeController";
 
+
+/**
+ * handles the query sent by a user
+ * analyses the query details and appropriately responds using financial metrics and transcripts
+ */
 const handleUserQuery = async (req: Request, res: Response) => {
   try {
     const { query, conversation = [], mentionedCompanies = [] } = req.body;
@@ -15,7 +20,7 @@ const handleUserQuery = async (req: Request, res: Response) => {
       return;
     }
 
-    // Step 1: Extract query details
+    //extracting details from the query
     const details = await extractQueryDetails(query, { history: conversation });
 
     if (details.casual) {
@@ -23,7 +28,7 @@ const handleUserQuery = async (req: Request, res: Response) => {
       return;
     }
 
-    // ✅ If no company is mentioned, reuse last mentioned company
+    //if no company is mentioned but its a follow-up question, reuse the last mentioned company
     if (!details.companies || details.companies.length === 0) {
       if (mentionedCompanies.length > 0) {
         details.companies = [mentionedCompanies[mentionedCompanies.length - 1]];
@@ -40,7 +45,7 @@ const handleUserQuery = async (req: Request, res: Response) => {
     let responseMessages: string[] = [];
     const companyTickers = await getTickersFromCompanyNames(details.companies);
 
-    // ✅ Handle financial metric queries
+    //handling financial metrics
     if (details.intent === "financial_metrics" && details.financialMetric) {
       console.log(
         `Fetching financial metric for ${
@@ -56,7 +61,7 @@ const handleUserQuery = async (req: Request, res: Response) => {
       }
     }
 
-    // ✅ Handle earnings call transcript summaries
+    //handling transcript summaries
     if (details.intent === "summarization") {
       for (const [company, ticker] of Object.entries(companyTickers)) {
         console.log(`Processing summary for ${company} (${ticker})`);
@@ -72,7 +77,7 @@ const handleUserQuery = async (req: Request, res: Response) => {
           continue;
         }
 
-        const reply = await summarizeEarningsCall(
+        const reply = await summarizeTranscriptController(
           earningsCalls.join("\n\n"),
           query,
           company,
@@ -82,7 +87,7 @@ const handleUserQuery = async (req: Request, res: Response) => {
         responseMessages.push(reply || "No summary found");
       }
     }
-
+    //return the response
     res
       .status(200)
       .json({
