@@ -1,56 +1,80 @@
 import { OpenAI } from "openai";
-import { raw, Request, Response } from "express";
-import nlp from "compromise";
-import {
-  fetchEarningsCallData,
-  getTickersFromCompanyNames,
-} from "./financeController";
+
+interface ConversationContext {
+  history: { user: string; ai?: string }[];
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Function to extract the company name from the query
+const extractQueryDetails = async (
+  query: string,
+  context: ConversationContext
+): Promise<any> => {
+  const conversationHistory = context.history
+    .map((msg) => `User: ${msg.user}\nAI: ${msg.ai || ""}`)
+    .join("\n");
 
-// const extractCompanyName = (query: string): string | null => {
-//     const doc = nlp(query);
-
-//     const organizations = doc.organizations().out("array");
-
-//     if (organizations.length > 0) {
-//         const firstCompany = organizations[0].split(" ")[0];
-//         return firstCompany;
-//     }
-
-//     return null;
-// };
-
-// Function to extract query details
-const extractQueryDetails = async (query: string): Promise<any> => {
+ /**
+  * Using the prompt below, analyze the latest query and extract relevant details.
+  * If the query is a follow-up question, infer missing details from the conversation history.
+  * If the query is casual (e.g. "Nice", "Tell me more"), set "casual": true.
+  * Extract details only from query if available.
+  * If details are missing, refer to previous responses and history
+  * If the query is asking for a specific financial metric (e.g. "revenue," "gross profit," "net income"), set "intent" to "financial_metrics" and extract the requested metric.
+  * Return a valid JSON object only in this format to make it easier to parse
+  */
   const prompt = `
-    Extract the following details from the query:
-    - Company names mentioned in the query (e.g., Apple, Spotify).
-    - Executives mentioned in the query (e.g., Mark Zuckerberg, Satya Nadella, Tim Cook, Jeff Bezos).
-    - Topics mentioned in the query (e.g., AI, profitability).
-    - Time range (e.g., latest, last quarter, last few earnings calls).
-    - Intent (e.g., summarization, financial metrics).
+  Given the conversation history below, analyze the latest query and extract relevant details.
 
-    If no company is mentioned but executives are listed, infer the companies they are associated with.
-    Ensure the response is **valid JSON only** with no extra text.
+    **Conversation History:**  
+    ${conversationHistory}
 
+    **Latest User Query:**  
+    "${query}"
 
-    Query: "${query}"
+    **Instructions:**  
+    - If the query is a **follow-up question**, infer missing details from the conversation history.
+    - If the query is **casual (e.g. "Nice", "Tell me more")**, set "casual": true.
+    - Extract details **only if they exist** (e.g. company names, executives, topics, time range, intent).
+    - If details are missing, refer to previous responses **but do not assume incorrectly**.
+    - If the query is asking for a **specific financial metric** (e.g. "revenue," "profit margin," "net income"), set **intent** to "financial_metrics" and extract the requested metric.
+    - Return a **valid JSON object only** in this format:
 
-    Respond in **valid JSON format** without additional text. Use this format exactly:
+     If no company is mentioned but executives are listed, infer the companies they are associated with.
+     Ensure the response is **valid JSON only** with no extra text.
     {
-        "companies": ["Company1"],
+        "originalQuery": "User's original query",
+        "casual": false,
+        "isFollowUp": true, 
+        "companies": ["Company1"], // Use last mentioned company if missing
         "executives": ["Executive1"],
         "topics": ["Topic1"],
         "timeRange": "latest",
-        "intent": "summarization"
+        "financialMetric": "revenue", // Extracted financial metric if present
+        "intent": "financial_metrics" or "summarization",
+        "conversationHistory": [
+            {"user": "Previous user message", "ai": "Previous AI response"}
+        ]
     }
-    `;
 
+    **If the query is casual (e.g., "Okay", "Tell me more"), return:**  
+    {
+        "originalQuery": "User's original query",
+        "casual": true,
+        "response": "Sure! Let me know how I can assist further." 
+    }
+
+    Query: "${query}"
+    **IMPORTANT:**  
+    - **DO NOT** include Markdown formatting ("\""\""\"json" or "\"\"\")
+    - **DO NOT** include any extra text before or after the JSON.  
+    - **Return ONLY the raw JSON.**  
+    - **DO NOT summarize or add explanations.**  
+
+    Query: "${query}"
+  `;
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -59,24 +83,31 @@ const extractQueryDetails = async (query: string): Promise<any> => {
     });
 
     const rawContent = response.choices[0].message?.content?.trim();
-    console.log("Raw OpenAI Response:", rawContent);
+    // console.log("Raw OpenAI Response:", rawContent); //debug responses
 
     if (!rawContent) {
       throw new Error("OpenAI returned an empty response.");
     }
-    console.log("Extracted JSON:", JSON.parse(rawContent));
-    return JSON.parse(rawContent);
+
+    const parsedResponse = JSON.parse(rawContent);
+    if (parsedResponse) {
+      return parsedResponse;
+    }
+    // console.log("Extracted JSON:", parsedResponse); // debug parsed responses
+
+    return parsedResponse;
   } catch (error: any) {
     console.error("Error extracting query details:", error.message);
-    return null;
+    return { originalQuery: query, casual: true };
   }
 };
 
-const summarizeEarningsCall = async (
+const summarizeTranscriptController = async (
   transcript: string,
   query: string,
   company: string,
-  ticker: string
+  ticker: string,
+  conversation: string
 ): Promise<string | null> => {
   try {
     const prompt = `
@@ -88,6 +119,9 @@ const summarizeEarningsCall = async (
           0,
           4000
         )}  // Trim transcript to 4000 characters to avoid token limit
+
+         --- Conversation History ---
+          ${conversation}
     
         --- User's query ---
         ${query}
@@ -97,16 +131,11 @@ const summarizeEarningsCall = async (
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
+      // model: 'gpt-3.5-turbo', //incase gpt-4 is not available
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
+      // max_tokens: 500, //incase gpt-4 is not available
     });
-    // const response = await openai.chat.completions.create({
-    //     model: 'gpt-3.5-turbo',  // Uses a cheaper, token-efficient model
-    //     messages: [{ role: 'user', content: prompt }],
-    //     temperature: 0.7,
-    //     max_tokens: 500,
-    // });
-
     return response.choices[0].message?.content || null;
   } catch (error: any) {
     console.error("Error summarizing earnings call:", error.message);
@@ -114,4 +143,4 @@ const summarizeEarningsCall = async (
   }
 };
 
-export { summarizeEarningsCall, extractQueryDetails };
+export { summarizeTranscriptController, extractQueryDetails };

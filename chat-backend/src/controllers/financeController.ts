@@ -4,7 +4,11 @@ import axios from "axios";
 
 const API_KEY = process.env.FMP_API_KEY;
 
-const fetchEarningsCallData = async (
+/**
+ * function to fetch earnings call transcript
+ * fetches the transcript of the latest earnings call, using ticker, year and quarter
+ */
+const fetchEarningsCallTranscriptData = async (
   ticker: string,
   year: number,
   quarter: number
@@ -37,6 +41,11 @@ const fetchEarningsCallData = async (
   }
 };
 
+/**
+ * function to understand multiple quarters, and context behind the query
+ *
+ */
+
 const fetchEarningsWithContext = async (
   ticker: string,
   timeRange: string
@@ -46,9 +55,9 @@ const fetchEarningsWithContext = async (
   let currentYear = year;
   let currentQuarter = quarter;
 
-//   console.log(`Fetching earnings for ${ticker} with time range: ${timeRange}`);
+  console.log(`Fetching earnings for ${ticker} with time range: ${timeRange}`);
 
-  // Check if time range is multiple quarters
+  // Check if time range is multiple quarters, and set attempts accordingly
   const isMultipleQuarters =
     timeRange.toLowerCase().includes("last") ||
     timeRange.toLowerCase().includes("few") ||
@@ -58,28 +67,26 @@ const fetchEarningsWithContext = async (
     timeRange.toLowerCase().includes("three") ||
     timeRange.toLowerCase().includes("four");
   let attempts = 0;
-  const maxAttempts = isMultipleQuarters ? 4 : 8; // Stop after 8 quarters (2 years) to prevent infinite loop
+  const maxAttempts = isMultipleQuarters ? 4 : 8; // Maximum attempts for multiple quarters
 
   while (attempts < maxAttempts) {
-    // console.log(
-    //   `Checking earnings call for ${ticker}, Year: ${currentYear}, Quarter: ${currentQuarter}`
-    // );
+    // console.log(`Checking earnings call for ${ticker}, Year: ${currentYear}, Quarter: ${currentQuarter}`); // denug
 
-    const transcript = await fetchEarningsCallData(
+    const transcript = await fetchEarningsCallTranscriptData(
       ticker,
       currentYear,
       currentQuarter
     );
     if (transcript) {
       earningsCalls.push(transcript);
-    //   console.log(
-    //     `Found earnings call for ${ticker} in ${currentYear} Q${currentQuarter}!`
-    //   );
+      console.log(
+        `Found earnings call for ${ticker} in ${currentYear} Q${currentQuarter}!`
+      );
 
       if (!isMultipleQuarters) break; // Stop if we only need the latest one
     } else {
       console.log(
-        `No transcript of earnings call found for ${ticker} in ${currentYear} Q${currentQuarter}, checking previous quarter...`
+        `No transcript of earnings call found for ${ticker} in ${currentYear} Q${currentQuarter}, checking previous quarter`
       );
     }
 
@@ -96,7 +103,7 @@ const fetchEarningsWithContext = async (
 
   if (earningsCalls.length === 0) {
     console.log(
-      `No earnings call found for ${ticker} after checking the last ${attempts} quarters.`
+      `No earnings call found for ${ticker} after checking the last ${attempts} quarters`
     );
   }
 
@@ -119,10 +126,10 @@ const COMPANY_ALIASES: { [key: string]: string } = {
   lyft: "Lyft Inc.",
 };
 
+// function to fetch tickers from company names, and store them in a map
 const getTickersFromCompanyNames = async (
   companyNames: string[] | string
 ): Promise<{ [key: string]: string }> => {
-
   let companyTickerMap: { [key: string]: string } = {}; // map to store company names and their corresponding tickers
 
   if (typeof companyNames === "string") {
@@ -147,36 +154,55 @@ const getTickersFromCompanyNames = async (
 
       if (filteredResults.length > 0) {
         const ticker = filteredResults[0].symbol;
-        // console.log(`Found ticker: ${ticker} for company: ${company}`);
         companyTickerMap[company] = ticker;
       }
-    //   console.log(companyTickerMap);
     }
   }
 
   return companyTickerMap;
 };
 
-//for single company testing
-// const getTickerFromCompanyName = async (companyName: string): Promise<string | null> => {
-//     try {
-//         console.log(`Fetching ticker for company: ${companyName}`);
-//         const response = await axios.get(`https://financialmodelingprep.com/api/v3/search?query=${companyName}&apikey=${API_KEY}`);
-//         const searchResults = response.data;
+//function to fetch financial metric
+const fetchFinancialMetric = async (
+  ticker: string,
+  metric: string
+): Promise<string | null> => {
+  try {
+    const response = await axios.get(
+      `https://financialmodelingprep.com/api/v3/income-statement/${ticker}?period=annual&apikey=${API_KEY}`
+    );
+    const data = response.data[0];
 
-//         if (!searchResults || searchResults.length === 0) {
-//             console.log(`No ticker found for company: ${companyName}`);
-//             return null;
-//         }
-//         const filteredResults = searchResults.filter((result: any) =>
-//             ["NASDAQ", "NYSE"].includes(result.exchangeShortName)
-//         );
-//         return filteredResults[0].symbol;
-//     } catch (error: any) {
-//         console.error("Error fetching ticker:", error.response?.data || error.message);
-//         return null;
-//     }
-// };
+    if (!data) return `No data available for ${metric} of ${ticker}.`;
+
+    const metricMap: { [key: string]: string } = {
+      revenue: "revenue",
+      "net income": "netIncome",
+      eps: "eps",
+      ebitda: "ebitda",
+      "earnings before interest and taxes": "ebitda",
+      "gross profit": "grossProfit",
+      profit: "grossProfit",
+      "cost and expenses": "costAndExpenses",
+      "operating income": "operatingIncome",
+    };
+
+    if (!metricMap[metric.toLowerCase()]) {
+      return `Metric '${metric}' is not supported.`;
+    }
+
+    const result = data[metricMap[metric.toLowerCase()]];
+
+    return result
+      ? `${metric}: ${result.toLocaleString()}`
+      : `No data available for ${metric} of ${ticker}`;
+  } catch (error: any) {
+    console.error("Error fetching financial metric:", error.message);
+    return `Error retrieving ${metric} for ${ticker}`;
+  }
+};
+
+// Controller fuction to fetch earnings call
 
 const fetchEarningsCallController = async (req: Request, res: Response) => {
   const { ticker } = req.params;
@@ -196,7 +222,7 @@ const fetchEarningsCallController = async (req: Request, res: Response) => {
     if (earningCallsTranscript.length === 0) {
       res.status(404).json({ error: "No transcript found" });
       return;
-    } 
+    }
 
     res.status(200).json({ data: earningCallsTranscript });
   } catch (error: any) {
@@ -208,6 +234,7 @@ const fetchEarningsCallController = async (req: Request, res: Response) => {
   }
 };
 
+// Controller fuction to fetch ticker
 const getTickerController = async (
   req: Request,
   res: Response
@@ -222,18 +249,50 @@ const getTickerController = async (
   const ticker = await getTickersFromCompanyNames(company);
 
   if (!ticker) {
-    res
-      .status(404)
-      .json({ error: "No ticker found for the provided company" });
+    res.status(404).json({ error: "No ticker found for the provided company" });
     return;
   }
 
   res.status(200).json({ ticker });
 };
+
+// Controller function to fetch financial metric
+const getFinancialMetricController = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { ticker, metric } = req.params;
+
+    if (!ticker || !metric) {
+      res.status(400).json({ error: "Ticker and metric are required." });
+      return;
+    }
+
+    const result = await fetchFinancialMetric(ticker, metric);
+
+    if (!result) {
+      res
+        .status(404)
+        .json({ error: `No data found for ${metric} of ${ticker}.` });
+      return;
+    }
+
+    res.status(200).json({ data: result });
+    return;
+  } catch (error: any) {
+    console.error("Error in getFinancialMetricController:", error.message);
+    res.status(500).json({ error: "Internal server error." });
+    return;
+  }
+};
+
 export {
   fetchEarningsCallController,
-  fetchEarningsCallData,
+  fetchEarningsCallTranscriptData,
   getTickerController,
   getTickersFromCompanyNames,
   fetchEarningsWithContext,
+  getFinancialMetricController,
+  fetchFinancialMetric,
 };
