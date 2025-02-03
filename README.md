@@ -19,6 +19,7 @@ A conversational AI chatbot that allows users to query earnings call transcripts
 ---
 
 ## **Setup and Installation**
+
 1. **Clone the repository**
    ```bash
       git clone https://github.com/NutanNimkar/FinChat.git
